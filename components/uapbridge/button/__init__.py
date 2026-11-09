@@ -8,9 +8,11 @@ DEPENDENCIES = ["uapbridge"]
 
 UAPBridgeButtonVent = uapbridge_ns.class_("UAPBridgeButtonVent", button.Button, cg.Component)
 UAPBridgeButtonImpulse = uapbridge_ns.class_("UAPBridgeButtonImpulse", button.Button, cg.Component)
+UAPBridgeButtonLight = uapbridge_ns.class_("UAPBridgeButtonLight", button.Button, cg.Component)
 
 CONF_BUTTON_VENT = "vent_button"
 CONF_BUTTON_IMPULSE = "impulse_button"
+CONF_BUTTON_TOGGLE_LIGHT = "toggle_light_button"   # 1.0.1: recommended for the P series (light state not reported)
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -20,6 +22,9 @@ CONFIG_SCHEMA = cv.Schema(
         ),
         cv.Optional(CONF_BUTTON_IMPULSE): button.button_schema(
             UAPBridgeButtonImpulse, icon="mdi:arrow-up-down"
+        ),
+        cv.Optional(CONF_BUTTON_TOGGLE_LIGHT): button.button_schema(
+            UAPBridgeButtonLight, icon="mdi:lightbulb-on-outline"
         ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -36,3 +41,8 @@ async def to_code(config):
         impulse_button = await button.new_button(conf)
         await cg.register_component(impulse_button, conf)
         cg.add(impulse_button.set_uapbridge_parent(parent))
+
+    if conf := config.get(CONF_BUTTON_TOGGLE_LIGHT):
+        light_button = await button.new_button(conf)
+        await cg.register_component(light_button, conf)
+        cg.add(light_button.set_uapbridge_parent(parent))

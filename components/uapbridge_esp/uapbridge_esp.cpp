@@ -6,6 +6,7 @@ static const char *const TAG = "uapbridge_esp";
 
 void UAPBridge_esp::loop() {
   this->loop_fast();
+  this->check_connection();   // 1.0.1: timeout check in loop(), not in the receive path
   if (this->einwurf_v2) {
     this->inject_check_v2();
     // v2: while a command is pending/being verified, run the main loop without the 16 ms pause
@@ -41,9 +42,13 @@ void UAPBridge_esp::inject_check() {
   if (ok) {
     ESP_LOGI(TAG, "Inject: command %04X effective after %d attempt(s)", this->pending_action, this->pending_tries);
     this->pending_action = hoermann_action_none; this->pending_tries = 0;
+    this->set_result("confirmed");
+    this->note_inject_outcome(1);
   } else if (this->pending_tries >= 3) {
     ESP_LOGW(TAG, "Inject: command %04X without effect after 3 attempts - giving up", this->pending_action);
     this->pending_action = hoermann_action_none; this->pending_tries = 0;
+    this->set_result("failed");
+    this->note_inject_outcome(-1);
   } else {
     this->next_action = this->pending_action;   // next attempt at the next status request
     this->pending_time = millis();
@@ -63,13 +68,23 @@ const char *UAPBridge_esp::action_name(uint16_t a) {
   }
 }
 
-void UAPBridge_esp::v2_finish(const char *ergebnis) {
+void UAPBridge_esp::v2_finish(const char *ergebnis, int8_t outcome) {
   snprintf(this->msg_buf, sizeof(this->msg_buf), "%04X %s: %s after %d attempt%s (0x%04X->0x%04X), fetched after %u ms",
            this->pending_action, action_name(this->pending_action), ergebnis, this->pending_tries,
            this->pending_tries == 1 ? "" : "s", this->pending_status0, this->broadcast_status, (unsigned) this->fetch_ms);
   this->msg_dirty = true;
   this->pending_action = hoermann_action_none;
   this->pending_tries = 0;
+  this->retryable = false;
+  // 1.0.1: four result classes; a missing confirmation of a command whose effect cannot be observed
+  // (P series light/impulse/stop, travel from an intermediate position) is NOT a failure
+  switch (outcome) {
+    case 1: this->set_result("confirmed"); break;
+    case -1: this->set_result("failed"); break;
+    case 0: this->set_result("not observable"); break;
+    default: this->set_result("replaced"); break;
+  }
+  this->note_inject_outcome(outcome);
 }
 
 void UAPBridge_esp::inject_check_v2() {
@@ -85,6 +100,9 @@ void UAPBridge_esp::inject_check_v2() {
       this->next_action = hoermann_action_none;
       this->pending_action = hoermann_action_none;
       this->pending_tries = 0;
+      this->retryable = false;
+      this->set_result("failed");
+      this->note_inject_outcome(-1);
     }
     return;
   }
@@ -109,9 +127,9 @@ void UAPBridge_esp::inject_check_v2() {
           window = this->retryable ? 2000 : 30000;
           break;   // ok = false -> retry/unconfirmed after window
         }
-        if (e & hoermann_state_open) { this->v2_finish("reached Open instead of venting"); return; }
-        if (e & hoermann_state_closed) { this->v2_finish("back in Closed instead of venting"); return; }
-        if (now - this->vent_left_time >= 25000) { this->v2_finish("confirmed (end position left, 25 s without end position)"); return; }
+        if (e & hoermann_state_open) { this->v2_finish("reached Open instead of venting", 1); return; }
+        if (e & hoermann_state_closed) { this->v2_finish("back in Closed instead of venting", 1); return; }
+        if (now - this->vent_left_time >= 25000) { this->v2_finish("end position left, 25 s without end position (venting assumed, estimate)", 1); return; }
         return;
       }
       ok = (s & (hoermann_state_moving | hoermann_state_venting)) ||
@@ -138,34 +156,75 @@ void UAPBridge_esp::inject_check_v2() {
       window = 2000;
       break;
   }
-  if (ok) { this->v2_finish("confirmed"); return; }
+  if (ok) { this->v2_finish("confirmed", 1); return; }
   if (now - this->pending_time < window) return;
   if (this->retryable && this->pending_tries < 3) {
     this->next_action = this->pending_action;   // effect would have been measurable -> next attempt at next request
     this->next_set_time = now;
     return;
   }
-  this->v2_finish(this->retryable ? "without effect" : "sent, unconfirmed");
+  if (this->retryable) this->v2_finish("without effect", -1);
+  else this->v2_finish("sent, effect not observable", 0);
+}
+
+// 1.0.1: position tracking moved out of the receive path (runs in loop_slow, every 100 ms)
+void UAPBridge_esp::track_position() {
+  if (!this->valid_broadcast) return;
+  const uint16_t pos = this->broadcast_status & (hoermann_state_open | hoermann_state_closed);
+  if (pos == this->pos_prev) return;
+  const uint32_t now = millis();
+  if (pos & (hoermann_state_open | hoermann_state_closed)) {
+    this->last_endlage = (pos & hoermann_state_open) ? 1 : 2;
+    this->last_move_cmd = hoermann_action_none;
+    this->dir_cmd = hoermann_action_none;
+  } else {
+    // end position left (or first status after boot/reconnect in an intermediate position)
+    this->zero_since = now;
+    this->left_end_seen = (this->pos_prev != 0xFFFF);
+    this->dir_cmd = hoermann_action_none;
+    // a direction is only claimed if OUR command was fetched shortly before and matches the end position left
+    if (this->left_end_seen && this->last_move_cmd != hoermann_action_none && now - this->last_move_time <= 5000) {
+      const bool from_closed = this->pos_prev & hoermann_state_closed;
+      const bool from_open = this->pos_prev & hoermann_state_open;
+      if ((this->last_move_cmd == hoermann_action_open && from_closed) ||
+          (this->last_move_cmd == hoermann_action_close && from_open) ||
+          (this->last_move_cmd == hoermann_action_venting && (from_closed || from_open)))
+        this->dir_cmd = this->last_move_cmd;
+    }
+  }
+  this->pos_prev = pos;
 }
 
 void UAPBridge_esp::update_derived() {
   if (this->status_abgeleitet_sensor_ == nullptr) return;
   const char *d;
   const uint32_t now = millis();
-  if (this->pos_prev == 0xFFFF) d = "unknown";
+  const uint16_t s = this->broadcast_status;
+  const uint16_t mv = hoermann_state_direction | hoermann_state_moving;
+  if (!this->valid_broadcast || this->pos_prev == 0xFFFF) d = "unknown";
   else if (this->pos_prev & hoermann_state_open) d = "Open";
   else if (this->pos_prev & hoermann_state_closed) d = "Closed";
-  else {
-    uint32_t ref = this->zero_since;
-    if (this->last_move_cmd != hoermann_action_none && (int32_t)(this->last_move_time - ref) > 0) ref = this->last_move_time;
+  else if (this->motion_bits_seen && !this->p_modus) {
+    // drive reports moving/direction bits (E series): direction is known no matter who started the travel
+    if ((s & mv) == hoermann_state_opening) d = "Opening";
+    else if ((s & mv) == hoermann_state_closing) d = "Closing";
+    else if (s & hoermann_state_venting) d = "Venting";
+    else d = "Stopped";
+  } else {
+    const bool own_cmd_recent = this->last_move_cmd != hoermann_action_none &&
+                                (int32_t)(this->last_move_time - this->zero_since) >= 0 && now - this->last_move_time <= 25000;
     if (this->last_move_cmd == hoermann_action_stop) d = "Stopped";
-    else if (now - ref > 25000) d = (this->last_move_cmd == hoermann_action_venting) ? "Venting" : "Stopped between end positions (venting?)";
-    else if (this->last_move_cmd == hoermann_action_open) d = "Opening";
-    else if (this->last_move_cmd == hoermann_action_close) d = "Closing";
-    else if (this->last_move_cmd == hoermann_action_venting) d = "Moving to venting";
-    else if (this->last_endlage == 2) d = "Opening";
-    else if (this->last_endlage == 1) d = "Closing";
-    else d = "Intermediate position";
+    else if (this->dir_cmd != hoermann_action_none) {
+      if (now - this->zero_since > 25000)
+        d = (this->dir_cmd == hoermann_action_venting) ? "Venting (estimate)" : "Stopped between end positions (venting assumed)";
+      else if (this->dir_cmd == hoermann_action_open) d = "Opening";
+      else if (this->dir_cmd == hoermann_action_close) d = "Closing";
+      else d = "Moving to venting";
+    }
+    else if (own_cmd_recent) d = "Intermediate position (command sent, effect not observable)";
+    else if (!this->left_end_seen) d = "Intermediate position";
+    else if (now - this->zero_since <= 25000) d = "Moving (direction unknown)";   // remote, wall button or real UAP1
+    else d = "Stopped between end positions (venting assumed)";
   }
   if (d != this->derived_prev) {   // pointers to literals -> comparison is enough
     this->derived_prev = d;
@@ -173,9 +232,97 @@ void UAPBridge_esp::update_derived() {
   }
 }
 
+// ---------------- 1.0.1: connection timeout, inject protection, diagnostics ----------------
+void UAPBridge_esp::check_connection() {
+  if (!this->broadcast_ever) return;
+  const uint32_t age = millis() - this->last_broadcast_ms;
+  const bool fresh = (this->connection_timeout_ms == 0) || (age <= this->connection_timeout_ms);
+  if (fresh && !this->valid_broadcast) {
+    this->valid_broadcast = true;
+    this->data_has_changed = true;
+    ESP_LOGI(TAG, "Drive connected (valid status broadcast received)");
+  } else if (!fresh && this->valid_broadcast) {
+    this->valid_broadcast = false;
+    this->data_has_changed = true;
+    ESP_LOGW(TAG, "No valid status broadcast for %u ms - drive not connected, state unknown", (unsigned) age);
+    this->drop_commands("dropped (connection to drive lost)");
+    this->pos_prev = 0xFFFF;
+    this->dir_cmd = hoermann_action_none;
+    this->last_move_cmd = hoermann_action_none;
+    this->handle_state_change(hoermann_state_unkown);
+  }
+}
+
+void UAPBridge_esp::drop_commands(const char *reason) {
+  const hoermann_action_t a = (this->next_action != hoermann_action_none) ? this->next_action : this->pending_action;
+  if (a != hoermann_action_none) {
+    snprintf(this->msg_buf, sizeof(this->msg_buf), "%04X %s: %s", a, action_name(a), reason);
+    this->msg_dirty = true;
+    this->set_result("replaced");
+  }
+  this->next_action = hoermann_action_none;
+  this->pending_action = hoermann_action_none;
+  this->pending_tries = 0;
+  this->retryable = false;   // the dropped command must never be sent again
+}
+
+void UAPBridge_esp::note_inject_outcome(int8_t outcome) {
+  if (outcome == 1) {
+    if (this->inject_fail_streak != 0) { this->inject_fail_streak = 0; this->streak_dirty = true; }
+    return;
+  }
+  if (outcome != -1 || !this->inject_mode) return;   // "not observable" / "replaced" are no failures
+  if (this->inject_fail_streak < 255) this->inject_fail_streak++;
+  this->streak_dirty = true;
+  if (this->inject_max_failures != 0 && this->inject_fail_streak >= this->inject_max_failures && !this->passive) {
+    this->passive = true;
+    this->passive_since = millis();
+    ESP_LOGW(TAG, "Inject: %u failed commands in a row - no injects for %u s (passive)",
+             this->inject_fail_streak, (unsigned) (this->inject_pause_ms / 1000));
+  }
+}
+
+bool UAPBridge_esp::inject_paused() {
+  if (!this->passive) return false;
+  if (millis() - this->passive_since < this->inject_pause_ms) return true;
+  this->passive = false;
+  ESP_LOGI(TAG, "Inject: pause over, commands accepted again (failures in a row: %u)", this->inject_fail_streak);
+  return false;
+}
+
+void UAPBridge_esp::publish_counters() {
+  const uint32_t now = millis();
+  if (this->pending_action != hoermann_action_none && this->pending_tries != this->tries_seen) this->set_result("sent");
+  this->tries_seen = this->pending_tries;
+  if (this->inject_failures_sensor_ != nullptr && this->streak_dirty) {
+    this->streak_dirty = false;
+    this->inject_failures_sensor_->publish_state(this->inject_fail_streak);
+  }
+  if (this->command_result_sensor_ != nullptr && this->result_dirty) {
+    this->result_dirty = false;
+    this->command_result_sensor_->publish_state(this->result_text);
+  }
+  if (this->seconds_since_broadcast_sensor_ != nullptr && now - this->last_secs_check >= 1000) {
+    this->last_secs_check = now;
+    const int32_t secs = (int32_t) ((now - (this->broadcast_ever ? this->last_broadcast_ms : 0)) / 1000);
+    if (secs != this->secs_published) {
+      this->secs_published = secs;
+      this->seconds_since_broadcast_sensor_->publish_state(secs);
+    }
+  }
+  if (now - this->last_counter_publish >= 30000 || this->last_counter_publish == 0) {
+    this->last_counter_publish = now | 1;
+    if (this->valid_broadcasts_sensor_ != nullptr) this->valid_broadcasts_sensor_->publish_state(this->valid_broadcasts);
+    if (this->crc_errors_sensor_ != nullptr) this->crc_errors_sensor_->publish_state(this->crc_errors);
+  }
+}
+// ---------------- /1.0.1 ----------------
+
 void UAPBridge_esp::publish_diag() {
   if (this->next_action != hoermann_action_none) return;   // do not publish while waiting for the status request
+  this->track_position();
   this->update_derived();
+  this->publish_counters();
   if (this->msg_dirty) {
     this->msg_dirty = false;
     if (this->einwurf_v2) ESP_LOGI(TAG, "Inject: %s", this->msg_buf);
@@ -219,6 +366,10 @@ void UAPBridge_esp::loop_slow() {
   this->last_call_slow = millis();
   this->publish_diag();   // diagnostic sensors only here (not in the receive path)
 
+    if (!this->valid_broadcast) {
+      // 1.0.1: no (or no recent) valid broadcast -> keep state unknown, do not evaluate stale status bits
+      return;
+    }
     if (this->ignore_next_event) {
       this->ignore_next_event = false;
     } else {
@@ -337,18 +488,14 @@ void UAPBridge_esp::parse_frame() {
         ESP_LOGV(TAG, "->      Broadcast");
         this->broadcast_status = this->rx_data[2];
         this->broadcast_status |= (uint16_t)this->rx_data[3] << 8;
+        this->last_broadcast_ms = millis();   // 1.0.1: connection timeout (evaluated in loop())
+        this->broadcast_ever = true;
+        this->valid_broadcasts++;
         if (this->broadcast_status != this->last_raw) { this->last_raw = this->broadcast_status; this->raw_dirty = true; }
         if (this->broadcast_status & (hoermann_state_moving | hoermann_state_venting)) this->motion_bits_seen = true;
-        {
-          uint16_t pos = this->broadcast_status & (hoermann_state_open | hoermann_state_closed);
-          if (pos != this->pos_prev) {
-            if (pos & hoermann_state_open) { this->last_endlage = 1; this->last_move_cmd = hoermann_action_none; }
-            else if (pos & hoermann_state_closed) { this->last_endlage = 2; this->last_move_cmd = hoermann_action_none; }
-            else this->zero_since = millis();
-            this->pos_prev = pos;
-          }
-        }
         if (this->broadcast_status & hoermann_state_light_relay) this->light_bit_seen = true;
+      } else if (length == 2) {
+        this->crc_errors++;   // 1.0.1: approximate (sliding window), see README
       }
     }
     // Slave status request (only 4 byte --> other indices of rx_data!)
@@ -409,11 +556,8 @@ void UAPBridge_esp::parse_frame() {
         this->send_time = millis();
       }
     }
-    // Update valid_broadcast if a non-default message is received
-    if (!this->valid_broadcast && (this->rx_data[3] != 0 || this->rx_data[4] != 0)) {
-      this->valid_broadcast = true;
-      this->data_has_changed = true;
-    }
+    // 1.0.1: valid_broadcast is no longer set here from any non-zero byte; it follows valid broadcast
+    // frames (CRC + length) and the connection timeout, see check_connection()
 #if ESPHOME_LOGLEVEL >= ESPHOME_LOG_LEVEL_VERY_VERBOSE
     // just print the data
     if (this->byte_cnt >= 5) {
@@ -453,23 +597,48 @@ void UAPBridge_esp::transmit() {
   ESP_LOGVV(TAG, "TX duration: %dms", millis() - this->send_time);
 }
 /**
- * Helper to set next Command and *not* skip Current Command before end was sent
+ * Command acceptance (1.0.1):
+ * - rejected in monitor mode, without connection to the drive and during the inject pause
+ * - Stop replaces a command that is still waiting to be fetched (stop_priority); the replaced command is never sent
+ * - any other command is rejected while a command is waiting (a travel command never replaces a waiting Stop)
+ * - an accepted command ends the effect check/retries of the previous command, so it can never be sent again
  */
 void UAPBridge_esp::set_command(bool cond, const hoermann_action_t command) {
-  if (cond) {
-    if (this->next_action != hoermann_action_none) {
-      ESP_LOGW(TAG, "Last Command was not yet fetched by modbus! -- action cached %d", this->next_action);
-      if (this->einwurf_v2) {
-        snprintf(this->msg_buf, sizeof(this->msg_buf), "%04X %s: rejected, %04X %s still waiting to be fetched",
-                 command, action_name(command), this->next_action, action_name(this->next_action));
-        this->msg_dirty = true;
-      }
+  if (!cond) return;
+  const char *why = nullptr;
+  if (this->monitor_mode) why = "monitor mode, the board never sends";
+  else if (!this->valid_broadcast) why = "no connection to the drive";
+  else if (this->inject_mode && this->inject_paused()) why = "inject paused after repeated failures";
+  if (why != nullptr) {
+    ESP_LOGW(TAG, "Command %04X rejected: %s", command, why);
+    snprintf(this->msg_buf, sizeof(this->msg_buf), "%04X %s: rejected, %s", command, action_name(command), why);
+    this->msg_dirty = true;
+    this->set_result("rejected");
+    return;
+  }
+  if (this->next_action != hoermann_action_none) {
+    if (this->stop_priority && command == hoermann_action_stop && this->next_action != hoermann_action_stop) {
+      ESP_LOGI(TAG, "Stop replaces waiting command %04X", this->next_action);
+      // falls through: next_action is overwritten below, the pending/retry state is discarded
     } else {
-      this->next_action = command;
-      this->next_set_time = millis();
-      this->ignore_next_event = true;
+      ESP_LOGW(TAG, "Last Command was not yet fetched by modbus! -- action cached %d", this->next_action);
+      snprintf(this->msg_buf, sizeof(this->msg_buf), "%04X %s: rejected, %04X %s still waiting to be fetched",
+               command, action_name(command), this->next_action, action_name(this->next_action));
+      this->msg_dirty = true;
+      this->set_result("rejected");
+      return;
     }
   }
+  if (this->pending_action != hoermann_action_none && (this->pending_action != command || command == hoermann_action_stop)) {
+    // previous command is still being verified / would be retried -> end it, never repeat it
+    if (this->einwurf_v2) this->v2_finish(command == hoermann_action_stop ? "replaced by Stop" : "replaced by new command", 2);
+    this->pending_action = hoermann_action_none;
+    this->pending_tries = 0;
+    this->retryable = false;
+  }
+  this->next_action = command;
+  this->next_set_time = millis();
+  this->ignore_next_event = true;
 }
 
 void UAPBridge_esp::action_open() {
@@ -484,12 +653,15 @@ void UAPBridge_esp::action_close() {
 
 void UAPBridge_esp::action_stop() {
   ESP_LOGD(TAG, "Action: stop called");
+  // 1.0.1: Stop is always accepted while one of our commands is waiting or being verified
+  const bool own_cmd = this->stop_priority &&
+                       (this->next_action != hoermann_action_none || this->pending_action != hoermann_action_none);
   if (this->einwurf_v2) {
     // v2: some drives (P series) report no moving bits (status stays 0x0000 while moving) -> allow stop everywhere except in end positions
-    this->set_command(this->state != hoermann_state_open && this->state != hoermann_state_closed, hoermann_action_stop);
+    this->set_command(own_cmd || (this->state != hoermann_state_open && this->state != hoermann_state_closed), hoermann_action_stop);
     return;
   }
-  this->set_command((this->state == hoermann_state_opening || this->state == hoermann_state_closing), hoermann_action_stop);
+  this->set_command(own_cmd || (this->state == hoermann_state_opening || this->state == hoermann_state_closing), hoermann_action_stop);
 }
 
 void UAPBridge_esp::action_venting() {
@@ -525,7 +697,8 @@ void UAPBridge_esp::set_venting(bool state) {
 }
 
 void UAPBridge_esp::set_light(bool state) {
-  this->set_command((this->light_enabled != state), hoermann_action_toggle_light);
+  // P series: light state unknown -> every request toggles
+  this->set_command(this->p_modus || (this->light_enabled != state), hoermann_action_toggle_light);
   ESP_LOGD(TAG, "Light state set to %s", state ? "ON" : "OFF");
 }
 
@@ -579,6 +752,9 @@ void UAPBridge_esp::handle_state_change(hoermann_state_t new_state) {
       break;
     case hoermann_state_stopped:
       this->state_string = "Gestoppt";
+      break;
+    case hoermann_state_unkown:
+      this->state_string = "Keine Verbindung";
       break;
     default:
       this->state_string = "Fehler";

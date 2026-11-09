@@ -14,6 +14,7 @@ class UAPBridgeBinaryOutput : public output::BinaryOutput, public Component {
     void dump_config() override;
   protected:
     UAPBridge *parent_;
+    bool last_written_{false};
 };
 
 }  // namespace uapbridge

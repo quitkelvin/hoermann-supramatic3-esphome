@@ -6,6 +6,7 @@
 #include "esphome/core/log.h"
 #include "esphome/components/uapbridge/uapbridge.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/sensor/sensor.h"
 
 #define CYCLE_TIME                1   // ms
 #define CYCLE_TIME_SLOW         100   // ms
@@ -61,9 +62,26 @@ class UAPBridge_esp : public esphome::uapbridge::UAPBridge {
     // P series mode (drive reports only 0x0002/0x0001/0x0000): verify effect via end positions only, never repeat light
     void set_p_modus(bool v) { this->p_modus = v; }
     void set_status_abgeleitet_sensor(text_sensor::TextSensor *s) { this->status_abgeleitet_sensor_ = s; }
+    // --- 1.0.1 ---
+    // mode: monitor = only listen, never send (all commands are rejected)
+    void set_monitor_mode(bool v) { this->monitor_mode = v; }
+    // stop_priority (default true): Stop replaces a command that is still waiting to be fetched
+    void set_stop_priority(bool v) { this->stop_priority = v; }
+    // connection_timeout (default 5 s, 0 = off): no valid broadcast for this long -> drive "not connected"
+    void set_connection_timeout(uint32_t ms) { this->connection_timeout_ms = ms; }
+    // inject_max_failures (default 5, 0 = off) failed commands in a row -> no injects for inject_pause (default 60 s)
+    void set_inject_max_failures(uint8_t n) { this->inject_max_failures = n; }
+    void set_inject_pause(uint32_t ms) { this->inject_pause_ms = ms; }
+    void set_command_result_sensor(text_sensor::TextSensor *s) { this->command_result_sensor_ = s; }
+    void set_valid_broadcasts_sensor(sensor::Sensor *s) { this->valid_broadcasts_sensor_ = s; }
+    void set_crc_errors_sensor(sensor::Sensor *s) { this->crc_errors_sensor_ = s; }
+    void set_seconds_since_broadcast_sensor(sensor::Sensor *s) { this->seconds_since_broadcast_sensor_ = s; }
+    void set_inject_failures_sensor(sensor::Sensor *s) { this->inject_failures_sensor_ = s; }
+    // P series: the light bit is never reported -> the light can only be toggled
+    bool is_light_state_reported() const override { return !this->p_modus; }
 
   protected:
-    hoermann_state_t state = hoermann_state_stopped;
+    hoermann_state_t state = hoermann_state_unkown;   // 1.0.1: unknown until the first valid broadcast
     hoermann_action_t next_action = hoermann_action_none;
     // state variables
     std::string state_string = "unknown";
@@ -101,7 +119,8 @@ class UAPBridge_esp : public esphome::uapbridge::UAPBridge {
     bool       einwurf_v2       = false;
     void parse_frame();
     void inject_check_v2();
-    void v2_finish(const char *ergebnis);
+    // outcome: 1 = effect confirmed, -1 = failed, 0 = sent but effect not observable, 2 = replaced/dropped (neutral)
+    void v2_finish(const char *ergebnis, int8_t outcome = 2);
     void publish_diag();
     static const char *action_name(uint16_t a);
     text_sensor::TextSensor *letzter_befehl_sensor_ = nullptr;
@@ -129,6 +148,40 @@ class UAPBridge_esp : public esphome::uapbridge::UAPBridge {
     bool       vent_left        = false;  // venting: end position left
     uint32_t   vent_left_time   = 0;
     void update_derived();
+    // --- 1.0.1: command acceptance, connection timeout, inject protection, diagnostics (all outside the receive path) ---
+    bool       monitor_mode     = false;
+    bool       stop_priority    = true;
+    uint32_t   connection_timeout_ms = 5000;
+    uint32_t   last_broadcast_ms = 0;     // set in the broadcast branch (one assignment)
+    bool       broadcast_ever   = false;
+    uint32_t   valid_broadcasts = 0;      // counted in the broadcast branch (one increment)
+    uint32_t   crc_errors       = 0;      // broadcast candidates with wrong CRC (sliding window -> approximate)
+    uint8_t    inject_max_failures = 5;
+    uint32_t   inject_pause_ms  = 60000;
+    uint8_t    inject_fail_streak = 0;
+    uint32_t   passive_since    = 0;
+    bool       passive          = false;
+    bool       streak_dirty     = true;
+    const char *result_text     = "none";
+    bool       result_dirty     = true;
+    uint32_t   last_counter_publish = 0;
+    uint8_t    tries_seen       = 0;      // to report "sent" without touching the answer path
+    uint32_t   last_secs_check  = 0;
+    int32_t    secs_published   = -1;
+    hoermann_action_t dir_cmd   = hoermann_action_none;  // own move command confirmed for the current travel
+    bool       left_end_seen    = false;  // current "no end position" phase started by leaving an end position
+    text_sensor::TextSensor *command_result_sensor_ = nullptr;
+    sensor::Sensor *valid_broadcasts_sensor_ = nullptr;
+    sensor::Sensor *crc_errors_sensor_ = nullptr;
+    sensor::Sensor *seconds_since_broadcast_sensor_ = nullptr;
+    sensor::Sensor *inject_failures_sensor_ = nullptr;
+    void check_connection();
+    void track_position();
+    void drop_commands(const char *reason);
+    void set_result(const char *r) { this->result_text = r; this->result_dirty = true; }
+    void note_inject_outcome(int8_t outcome);
+    bool inject_paused();
+    void publish_counters();
     const uint8_t crc_table[256] = {
       0x00, 0x07, 0x0E, 0x09, 0x1C, 0x1B, 0x12, 0x15, 0x38, 0x3F, 0x36, 0x31, 0x24, 0x23, 0x2A, 0x2D,
       0x70, 0x77, 0x7E, 0x79, 0x6C, 0x6B, 0x62, 0x65, 0x48, 0x4F, 0x46, 0x41, 0x54, 0x53, 0x5A, 0x5D,

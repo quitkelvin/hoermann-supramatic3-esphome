@@ -29,12 +29,19 @@ It is a fork of the `uapbridge` / `uapbridge_esp` components from
 
 | Option | What it does |
 |---|---|
-| `parallel_uap1` (default `true`) | **Inject mode**: the original UAP1 stays connected. The board stays silent and only answers *one* status request of the drive when a command is pending. With `false` the board emulates the UAP1 (upstream behaviour). |
-| `inject_v2` | Answers immediately (every received byte is evaluated, main loop runs without its 16 ms pause while a command is pending) so the board answers before the real UAP1. A command that is not fetched within **3 s** is dropped instead of blocking all further commands until reboot. Effect check against the status broadcast, max. 3 attempts only where the effect is measurable. Stop is allowed everywhere except in the end positions. |
+| `mode` (1.0.1) | `monitor`: only listen, **never send** (safe start, all commands rejected). `inject`: control the door next to the real UAP1 (= `parallel_uap1: true` + `inject_v2: true`). `emulate`: the board replaces the UAP1 (= `parallel_uap1: false`, upstream behaviour, **experimental, not verified by us**). Without `mode` the deprecated options below keep their 1.0.0 meaning (a warning is logged). |
+| `parallel_uap1` (deprecated, default `true`) | **Inject mode**: the original UAP1 stays connected. The board stays silent and only answers *one* status request of the drive when a command is pending. With `false` the board emulates the UAP1 (upstream behaviour). |
+| `inject_v2` (deprecated, use `mode: inject`) | Answers immediately (every received byte is evaluated, main loop runs without its 16 ms pause while a command is pending) so the board answers before the real UAP1. A command that is not fetched within **3 s** is dropped instead of blocking all further commands until reboot. Effect check against the status broadcast, max. 3 attempts only where the effect is measurable. Stop is allowed everywhere except in the end positions. |
 | `p_series_mode` | For **SupraMatic P series 3**: their status only reports end positions (see below). The effect check then uses "end position left / reached"; light is sent exactly once; venting = closed position left + 25 s without end position. |
 | `last_command` | Text sensor: result of the last command (sent / confirmed / unconfirmed / not fetched / rejected, attempts, fetch time). |
 | `raw_status` | Text sensor: raw 16-bit status word of the broadcast, published on change. |
-| `derived_status` | Text sensor: Open / Closed / Opening / Closing / Stopped / Venting / … derived from end positions and the last command – useful for drives without moving bits. |
+| `derived_status` | Text sensor: Open / Closed / Opening / Closing / Stopped / Venting / … derived from end positions and the last command – useful for drives without moving bits. Since 1.0.1 a direction is only claimed when *our own* command was fetched ≤ 5 s before the end position was left (or the drive reports direction bits); otherwise `Moving (direction unknown)` (remote control, wall button, real UAP1). After 25 s without end position: `Stopped between end positions (venting assumed)` – an **estimate**. |
+| `stop_priority` (1.0.1, default `true`) | Stop replaces a command that is still waiting to be fetched; the replaced command is discarded and never sent (no retry). A travel command never replaces a waiting Stop. `false` = 1.0.0 behaviour. |
+| `connection_timeout` (1.0.1, default `5s`, `0s` = off) | No valid status broadcast (length + CRC) for this time → `Drive connected` off, state unknown (`Status` = "Keine Verbindung", cover idle at an intermediate position), waiting commands dropped, new commands rejected. Recovers automatically with the next valid broadcast. |
+| `inject_max_failures` (1.0.1, default `5`, `0` = off), `inject_pause` (default `60s`) | After this many **failed** commands in a row (not fetched / effect measurable but missing) no injects for `inject_pause` (passive, log warning). Commands whose effect cannot be observed do not count. |
+| `command_result` (1.0.1) | Text sensor: `sent`, `confirmed`, `not observable` (sent, effect cannot be seen on the bus, e.g. P series light/stop – **not** a failure and never retried), `failed`, plus `rejected` / `replaced`. |
+| `valid_broadcasts`, `crc_errors`, `seconds_since_broadcast`, `inject_failures` (1.0.1) | Optional diagnostic sensors. `crc_errors` is approximate: the parser uses a sliding window, so a few false counts are normal – watch for sudden increases. |
+| `toggle_light_button` (button platform, 1.0.1) | "Toggle light" button. **Use it instead of the light entity on the P series**: the drive does not report the light state, so an on/off light cannot know whether it is on. If a `light` is still configured with `p_series_mode`, a warning is logged and both on and off just send "toggle". |
 
 The example also sets `restore_mode: ALWAYS_OFF` for the light so that no "toggle light" command is sent on boot.
 
@@ -60,7 +67,11 @@ bit4 error · bit5 direction close · bit6 moving · bit7 venting. Command bytes
 ### Limitations
 
 - P series 3: during travel the drive reports `0x0000`, so the upstream status shows "Gestoppt" while moving;
-  use `derived_status`. The light state is not reported – Home Assistant only *assumes* it.
+  use `derived_status`. The light state is not reported – use `toggle_light_button`. Travel started from an
+  intermediate position is invisible on the bus until an end position is reached. Venting detection
+  ("25 s without end position") is an **estimate**.
+- ESPHome covers have no "unknown" state. On connection loss the cover shows idle/intermediate; use the
+  `Drive connected` binary sensor for availability in Home Assistant (e.g. a template cover with `availability`).
 - With a UAP1 connected, the UAP1 and the board answer the same address. `inject_v2` relies on answering faster
   than the UAP1. Do **not** enable `DEBUG`/`VERBOSE` logging or fast template sensors – both disturbed the timing
   in our tests (commands without effect).
@@ -109,6 +120,21 @@ Power: the board is supplied from the drive's bus (+24 V, measured 22.7 V). The 
 not specified by us – alternatively use a separate 12/24 V DC supply with open ends into `Power +/−` and connect
 only `GND`, `A`, `B` to the bus.
 
+### Upgrading from 1.0.0
+
+Nothing breaks: `parallel_uap1` / `inject_v2` are still accepted (deprecation warning). New behaviour that is
+active by default and can be switched off one by one for step-by-step testing: `stop_priority: false`,
+`connection_timeout: 0s`, `inject_max_failures: 0`. P series: replace the light by `toggle_light_button`.
+
+### Testing
+
+- Host test of the command/state logic with simulated bus frames (no hardware): `sh tests/host/run.sh`
+  (needs `g++`). Covers Stop priority, retries, connection timeout, inject pause, direction detection,
+  P series light, monitor mode.
+- At the door (in this order): `mode: monitor` first (status, `Drive connected`, counters), then `mode: inject`:
+  open, close, stop during travel, stop while a command is still waiting, toggle light, travel with the remote
+  (→ `Moving (direction unknown)`), WiFi loss / reboot (→ unknown), unplug the bus (→ timeout after 5 s).
+
 ### Installation
 
 ```yaml
@@ -136,6 +162,8 @@ later via OTA. No prebuilt binaries are provided on purpose (they would contain 
 | First command works, later ones are "rejected" | old inject logic without fetch timeout – enable `inject_v2` |
 | Error 7 on the drive | without UAP1: board does not answer (check `parallel_uap1: false`, wiring); with UAP1: never set `parallel_uap1: false` |
 | Shows "Gestoppt" while moving | P series 3 – use `derived_status` and `p_series_mode` |
+| All commands "rejected" | `mode: monitor` (by design), no connection (`Seconds since last broadcast` > 5), or inject pause after repeated failures (`Inject failures in a row`) |
+| Light entity jumps / wrong on P series | the P series does not report the light – use `toggle_light_button` |
 | OTA fails / high latency | WiFi power saving – `power_save_mode: none` |
 
 ---
@@ -160,6 +188,19 @@ Abgeleitet von `uapbridge`/`uapbridge_esp` aus
 - `p_series_mode`: für die **SupraMatic P Serie 3**, die nur Endlagen meldet – Wirkung über „Endlage verlassen/erreicht“,
   Licht genau einmal senden, Lüftung = Zu verlassen + 25 s ohne Endlage.
 - Sensoren `last_command` („Letzter Befehl“), `raw_status` („Rohstatus“), `derived_status` („Status abgeleitet“).
+- **Neu in 1.0.1:** `mode: monitor | inject | emulate` (monitor = nur mithören, nie senden – sicherer Start;
+  inject = neben der UAP1; emulate = UAP1 ersetzen, **experimentell**); `parallel_uap1`/`inject_v2` gelten weiter
+  (Hinweis „deprecated“). **Stopp hat Vorrang** (`stop_priority`): Stopp ersetzt einen noch nicht abgeholten
+  Befehl, der alte wird nie mehr gesendet; ein Fahrbefehl ersetzt keinen wartenden Stopp.
+  **Verbindungs-Timeout** (`connection_timeout`, Standard 5 s, 0 = aus): ohne gültigen Broadcast → „Antrieb
+  verbunden“ aus, Zustand unbekannt, wartende Befehle verworfen. **Inject-Schutz** (`inject_max_failures` 5,
+  `inject_pause` 60 s). **Befehlsergebnis** (`command_result`: gesendet / bestätigt / nicht beobachtbar /
+  fehlgeschlagen – „nicht beobachtbar“ ist kein Fehler und wird nicht wiederholt). Diagnose-Sensoren
+  `valid_broadcasts`, `crc_errors`, `seconds_since_broadcast`, `inject_failures`. **P-Serie: Licht nur als
+  Taster** `toggle_light_button` („Licht umschalten“), da der Antrieb den Lichtzustand nicht meldet.
+  `derived_status`: „Moving (direction unknown)“ = Fährt (Richtung unbekannt), wenn ohne eigenen Befehl
+  (Handsender, Taster, echte UAP1) eine Endlage verlassen wird; „Stopped between end positions (venting
+  assumed)“ = Halt zwischen Endlagen (vermutlich Lüftung) – nur eine **Schätzung**.
 - Beispiel mit `restore_mode: ALWAYS_OFF` fürs Licht (beim Start wird nichts gesendet).
 
 ### Getestet
@@ -202,7 +243,30 @@ keine Freigabe an Sprachassistenten ohne PIN, API-Verschlüsselung und OTA-Passw
 
 Siehe Tabelle im englischen Teil: kein Status → A/B, Buchse, Pins, Jumper prüfen; Status ja, Befehle nein →
 Buchse des Y-Steckers, `inject_v2`, kein DEBUG-Logging; Fehler 7 → ohne UAP1 antwortet das Board nicht bzw. mit
-UAP1 nie `parallel_uap1: false`; „Gestoppt“ während der Fahrt → P-Serie, `derived_status` nutzen.
+UAP1 nie `parallel_uap1: false`; „Gestoppt“ während der Fahrt → P-Serie, `derived_status` nutzen; alle Befehle
+„rejected“ → `mode: monitor`, keine Verbindung oder Inject-Pause.
+
+### Tests
+
+Host-Test der Befehls-/Zustandslogik mit simulierten Frames: `sh tests/host/run.sh` (g++). Am Tor: erst
+`mode: monitor`, dann `mode: inject`: Auf, Zu, Stopp während der Fahrt, Stopp ersetzt wartenden Befehl, Licht
+umschalten, Handsender-Fahrt → Richtung unbekannt, WLAN-Ausfall/Neustart → unbekannt, Bus abziehen → Timeout.
+Neue Logik einzeln abschaltbar: `stop_priority: false`, `connection_timeout: 0s`, `inject_max_failures: 0`.
+
+## References / related projects
+
+Links only – no code was copied from the projects below; see their own licenses.
+
+- Protocol background: [bouni – Hörmann UAP1 bus](https://blog.bouni.de/posts/2018/hoerrmann-uap1/)
+- [stephan192/hoermann_door](https://github.com/stephan192/hoermann_door) (origin of the `uapbridge` lineage)
+- [JSladen/hoermann_door_e2](https://github.com/JSladen/hoermann_door_e2)
+- [tsaG1337/SupraMatic-E3](https://github.com/tsaG1337/SupraMatic-E3)
+- [xuio/SupraMatic-E2](https://github.com/xuio/SupraMatic-E2)
+- [Tysonpower/HCPBridgeMqtt_tynet](https://github.com/Tysonpower/HCPBridgeMqtt_tynet)
+- The official ESPHome component [`hoermann_hcp`](https://esphome.io/) targets **series 4** drives (HCP2 bus,
+  a different protocol). This project is for **series 3** (UAP1 bus); the two are not interchangeable.
+
+Planned work: [ROADMAP.md](ROADMAP.md).
 
 ## License
 

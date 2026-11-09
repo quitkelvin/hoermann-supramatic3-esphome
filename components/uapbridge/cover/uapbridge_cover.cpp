@@ -57,6 +57,12 @@ void UAPBridgeCover::on_event_triggered() {
     case UAPBridge::hoermann_state_t::hoermann_state_closing:
       this->current_operation = cover::COVER_OPERATION_CLOSING;
       break;
+    case UAPBridge::hoermann_state_t::hoermann_state_unkown:
+      // 1.0.1: no valid broadcast (connection timeout / boot). ESPHome covers have no "unknown" state:
+      // idle + intermediate position; use the "Drive connected" binary sensor for availability (README).
+      this->current_operation = cover::COVER_OPERATION_IDLE;
+      this->position = 0.5;
+      break;
     case UAPBridge::hoermann_state_t::hoermann_state_error:
     case UAPBridge::hoermann_state_t::hoermann_state_venting:
     case UAPBridge::hoermann_state_t::hoermann_state_stopped:

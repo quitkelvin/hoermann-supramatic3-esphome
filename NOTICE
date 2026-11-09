@@ -17,7 +17,7 @@ which itself is a fork of
 The ESP-only port (without PIC16) is credited by the upstream README to @Rezoran.
 The original MIT copyright and permission notice is kept in LICENSE.
 
-components/uapbridge/       unchanged copy from upstream
+components/uapbridge/       copy from upstream, small additions since 1.0.1 (see CHANGELOG.md)
 components/uapbridge_esp/   modified (see CHANGELOG.md)
 
 Protocol background (links only, nothing copied):
