@@ -1,0 +1,34 @@
+hoermann-supramatic3-esphome
+============================
+
+This project is a modified copy of the ESPHome components `uapbridge` and
+`uapbridge_esp` from:
+
+  mariopenzendorfer/esphome-hoermann_supramatic_3
+  https://github.com/mariopenzendorfer/esphome-hoermann_supramatic_3
+  (based on commit 20f6509849c80b6424b68f63476470535f04200a), MIT License
+
+which itself is a fork of
+
+  14yannick/hoermann_door      https://github.com/14yannick/hoermann_door      (MIT)
+  Abildgren/hoermann_door      https://github.com/Abildgren/hoermann_door
+  stephan192/hoermann_door     https://github.com/stephan192/hoermann_door     (MIT, Copyright (c) 2021 stephan192)
+
+The ESP-only port (without PIC16) is credited by the upstream README to @Rezoran.
+The original MIT copyright and permission notice is kept in LICENSE.
+
+components/uapbridge/       unchanged copy from upstream
+components/uapbridge_esp/   modified (see CHANGELOG.md)
+
+Protocol background (links only, nothing copied):
+  - upstream docs/hoermann.md
+  - https://blog.bouni.de/posts/2018/hoerrmann-uap1/
+  - https://github.com/avshrs/ESP32_Hormann_Supramatic_e3 (stop command, referenced in source)
+
+Everything else (P series findings, inject mode v2, drawings, documentation)
+is based on our own observations on our own drives.
+
+Trademarks: "Hörmann", "SupraMatic" and "UAP1" are trademarks of their
+respective owners. This project is not affiliated with, endorsed or supported
+by Hörmann. No Hörmann firmware, source code, documents or schematics are
+included.

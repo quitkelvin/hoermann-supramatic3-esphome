@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 520" width="980" height="520" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <title>Wiring without UAP1 (board emulates UAP1, not verified)</title>
+  <rect x="0" y="0" width="980" height="520" fill="#ffffff"/>
+  <text x="24" y="36" font-size="20" font-weight="bold" fill="#111">Wiring WITHOUT UAP1 – board emulates the UAP1</text>
+  <text x="24" y="58" fill="#b00020" font-weight="bold">NOT VERIFIED by the authors of this fork (both of our installations keep a UAP1).</text>
+  <text x="24" y="78" fill="#555">Own drawing. Not an official Hörmann document. Identify the wires by measuring, not by pin numbers.</text>
+
+  <!-- Drive -->
+  <rect x="24" y="120" width="190" height="150" rx="8" fill="#eef2f7" stroke="#334" stroke-width="2"/>
+  <text x="119" y="148" text-anchor="middle" font-weight="bold">Door drive</text>
+  <text x="119" y="168" text-anchor="middle" fill="#444">SupraMatic E / P series 3</text>
+  <rect x="150" y="210" width="64" height="34" fill="#fff" stroke="#334" stroke-width="2"/>
+  <text x="182" y="232" text-anchor="middle" font-size="12">BUS</text>
+  <text x="119" y="262" text-anchor="middle" font-size="12" fill="#444">RJ12 bus socket</text>
+
+  <!-- cable -->
+  <path d="M214 227 L470 227 L470 320 L530 320" fill="none" stroke="#334" stroke-width="4"/>
+  <text x="340" y="216" text-anchor="middle" font-size="12" fill="#444">RJ12 6P6C cable, 1:1 (no UAP1, no splitter)</text>
+
+  <!-- breakout -->
+  <rect x="530" y="290" width="170" height="200" rx="8" fill="#f3f3f3" stroke="#334" stroke-width="2"/>
+  <text x="615" y="314" text-anchor="middle" font-weight="bold">RJ12 breakout</text>
+  <text x="615" y="332" text-anchor="middle" font-size="12" fill="#444">screw terminals</text>
+  <g font-size="13">
+    <text x="545" y="362">+24 V</text>
+    <text x="545" y="397">GND</text>
+    <text x="545" y="432">A</text>
+    <text x="545" y="467">B</text>
+  </g>
+
+  <!-- board -->
+  <rect x="770" y="290" width="190" height="200" rx="8" fill="#e8f5e9" stroke="#2f6b34" stroke-width="2"/>
+  <text x="865" y="314" text-anchor="middle" font-weight="bold">Waveshare</text>
+  <text x="865" y="332" text-anchor="middle" font-size="12">ESP32-S3-RS485-CAN</text>
+  <g font-size="13">
+    <text x="945" y="362" text-anchor="end">Power +</text>
+    <text x="945" y="397" text-anchor="end">Power −</text>
+    <text x="945" y="432" text-anchor="end">RS485 A+</text>
+    <text x="945" y="467" text-anchor="end">RS485 B−</text>
+  </g>
+  <line x1="700" y1="357" x2="770" y2="357" stroke="#c62828" stroke-width="3"/>
+  <line x1="700" y1="392" x2="770" y2="392" stroke="#111111" stroke-width="3"/>
+  <line x1="700" y1="427" x2="770" y2="427" stroke="#1565c0" stroke-width="3"/>
+  <line x1="700" y1="462" x2="770" y2="462" stroke="#ef8f00" stroke-width="3" stroke-dasharray="8 4"/>
+
+  <g font-size="12" fill="#333">
+    <text x="24" y="320">Firmware: parallel_uap1: false</text>
+    <text x="24" y="338">(answers the slave scan and every status request,</text>
+    <text x="24" y="356">behaviour of the upstream project).</text>
+    <text x="24" y="384">The board must answer every status request,</text>
+    <text x="24" y="402">otherwise the drive shows error 7 and stops.</text>
+    <text x="24" y="430">Functions that only the UAP1 provides (its inputs/</text>
+    <text x="24" y="448">relays, wired push buttons on the UAP1) are gone.</text>
+    <text x="24" y="476" fill="#b00020">Never connect a UAP1 at the same time with this setting.</text>
+  </g>
+</svg>

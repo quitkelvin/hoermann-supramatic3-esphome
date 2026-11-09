@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" width="980" height="560" font-family="Helvetica, Arial, sans-serif" font-size="14">
+  <title>Wiring with UAP1 (inject mode, Y splitter)</title>
+  <rect x="0" y="0" width="980" height="560" fill="#ffffff"/>
+  <text x="24" y="36" font-size="20" font-weight="bold" fill="#111">Wiring WITH UAP1 – inject mode (tested)</text>
+  <text x="24" y="58" fill="#555">Own drawing. Not an official Hörmann document. Identify the wires by measuring, not by pin numbers.</text>
+
+  <!-- Drive -->
+  <rect x="24" y="100" width="190" height="150" rx="8" fill="#eef2f7" stroke="#334" stroke-width="2"/>
+  <text x="119" y="128" text-anchor="middle" font-weight="bold">Door drive</text>
+  <text x="119" y="148" text-anchor="middle" fill="#444">SupraMatic E / P series 3</text>
+  <rect x="150" y="190" width="64" height="34" fill="#fff" stroke="#334" stroke-width="2"/>
+  <text x="182" y="212" text-anchor="middle" font-size="12">BUS</text>
+  <text x="119" y="242" text-anchor="middle" font-size="12" fill="#444">RJ12 bus socket</text>
+
+  <!-- Cable drive -> Y -->
+  <line x1="214" y1="207" x2="300" y2="207" stroke="#334" stroke-width="4"/>
+  <text x="257" y="196" text-anchor="middle" font-size="12" fill="#444">RJ12 6P6C</text>
+
+  <!-- Y splitter -->
+  <rect x="300" y="180" width="110" height="54" rx="6" fill="#fff7e6" stroke="#b7791f" stroke-width="2"/>
+  <text x="355" y="203" text-anchor="middle" font-weight="bold">Y splitter</text>
+  <text x="355" y="222" text-anchor="middle" font-size="12">RJ12 1 → 2, 1:1</text>
+
+  <!-- To UAP1 -->
+  <path d="M410 195 L470 195 L470 130 L530 130" fill="none" stroke="#334" stroke-width="4"/>
+  <rect x="530" y="96" width="170" height="70" rx="8" fill="#eef2f7" stroke="#334" stroke-width="2"/>
+  <text x="615" y="124" text-anchor="middle" font-weight="bold">UAP1 (original)</text>
+  <text x="615" y="146" text-anchor="middle" font-size="12" fill="#444">stays connected as before</text>
+
+  <!-- To breakout -->
+  <path d="M410 220 L470 220 L470 300 L530 300" fill="none" stroke="#334" stroke-width="4"/>
+  <rect x="530" y="270" width="170" height="210" rx="8" fill="#f3f3f3" stroke="#334" stroke-width="2"/>
+  <text x="615" y="294" text-anchor="middle" font-weight="bold">RJ12 breakout</text>
+  <text x="615" y="312" text-anchor="middle" font-size="12" fill="#444">screw terminals</text>
+  <g font-size="13">
+    <text x="545" y="342">+24 V</text>
+    <text x="545" y="377">GND</text>
+    <text x="545" y="412">A  (idle ≈ +4.0 V)</text>
+    <text x="545" y="447">B  (idle ≈ +0.45 V)</text>
+    <text x="545" y="470" font-size="11" fill="#666">2 contacts unused</text>
+  </g>
+
+  <!-- Waveshare board -->
+  <rect x="770" y="270" width="190" height="210" rx="8" fill="#e8f5e9" stroke="#2f6b34" stroke-width="2"/>
+  <text x="865" y="294" text-anchor="middle" font-weight="bold">Waveshare</text>
+  <text x="865" y="312" text-anchor="middle" font-size="12">ESP32-S3-RS485-CAN</text>
+  <g font-size="13">
+    <text x="945" y="342" text-anchor="end">Power +</text>
+    <text x="945" y="377" text-anchor="end">Power −</text>
+    <text x="945" y="412" text-anchor="end">RS485 A+</text>
+    <text x="945" y="447" text-anchor="end">RS485 B−</text>
+    <text x="945" y="470" text-anchor="end" font-size="11" fill="#555">120 Ω jumper OPEN</text>
+  </g>
+
+  <!-- wires -->
+  <line x1="700" y1="337" x2="770" y2="337" stroke="#c62828" stroke-width="3"/>
+  <line x1="700" y1="372" x2="770" y2="372" stroke="#111111" stroke-width="3"/>
+  <line x1="700" y1="407" x2="770" y2="407" stroke="#1565c0" stroke-width="3"/>
+  <line x1="700" y1="442" x2="770" y2="442" stroke="#ef8f00" stroke-width="3" stroke-dasharray="8 4"/>
+
+  <!-- notes -->
+  <g font-size="12" fill="#333">
+    <text x="24" y="300">Voltages measured against GND with the door idle:</text>
+    <text x="24" y="318">+24 V ≈ 22.7 V, A ≈ 4.0 V, B ≈ 0.45 V.</text>
+    <text x="24" y="346">The board is powered from the bus (+24 V → Power +).</text>
+    <text x="24" y="364">Current budget of the bus supply: not verified.</text>
+    <text x="24" y="392">Pin numbers printed on breakout boards differ</text>
+    <text x="24" y="410">(ours were mirrored compared with other docs).</text>
+    <text x="24" y="428">Always identify +24 V / GND / A / B with a multimeter.</text>
+    <text x="24" y="456">Firmware: parallel_uap1: true, inject_v2: true</text>
+    <text x="24" y="474">(+ p_series_mode: true for P series 3).</text>
+    <text x="24" y="520" fill="#b00020">Socket matters: with the splitter in the wrong socket we received the status, but commands</text>
+    <text x="24" y="538" fill="#b00020">had no effect; moving it fixed that. Disconnect the drive from mains before plugging anything.</text>
+  </g>
+</svg>

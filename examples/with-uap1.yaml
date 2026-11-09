@@ -1,0 +1,111 @@
+# Example: board on the Hörmann bus NEXT TO a real UAP1 (inject mode, Y splitter).
+# Tested by the authors on a SupraMatic E series 3 and a SupraMatic P series 3 with a
+# Waveshare ESP32-S3-RS485-CAN board. All names, passwords and keys are placeholders.
+substitutions:
+  name: garage-door
+  friendly_name: Garage door
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://quitkelvin/hoermann-supramatic3-esphome
+    components: [uapbridge, uapbridge_esp]
+    refresh: 1d
+
+logger:
+  level: INFO      # DEBUG/VERBOSE logging disturbs the answer timing on the bus
+  baud_rate: 0
+
+api:
+  encryption:
+    key: !secret garage_api_key
+
+ota:
+  - platform: esphome
+    password: !secret garage_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none   # WiFi power saving caused high latency and failed OTA updates
+  ap:
+    ssid: "Garage Door Fallback"
+    password: !secret garage_ap_password
+
+captive_portal:
+
+uart:
+  id: uart_bus
+  baud_rate: 19200
+  rx_pin: GPIO18           # Waveshare ESP32-S3-RS485-CAN: RS485 RX
+  tx_pin: GPIO17           # Waveshare ESP32-S3-RS485-CAN: RS485 TX
+
+uapbridge_esp:
+  id: garage_door_comp
+  uart_id: uart_bus
+  rts_pin: GPIO21          # Waveshare: RS485 direction (HIGH = transmit)
+  auto_correction: false   # never send commands on its own
+  parallel_uap1: true      # real UAP1 stays connected (default)
+  inject_v2: true          # recommended: immediate answer, 3 s fetch timeout, effect check
+  # p_series_mode: true    # ONLY for SupraMatic P series 3 (status reports only 0x0002/0x0001/0x0000)
+  derived_status:
+    name: "Derived status"
+  last_command:
+    name: "Last command"
+  raw_status:
+    name: "Raw status"
+
+cover:
+  - platform: uapbridge
+    name: "Door"
+    device_class: garage
+
+switch:
+  - platform: uapbridge
+    venting_switch:
+      id: venting_switch
+      name: "Venting position"
+
+output:
+  - platform: uapbridge
+    id: gd_light
+
+light:
+  - platform: uapbridge
+    id: door_light
+    name: "Light"
+    output: gd_light
+    restore_mode: ALWAYS_OFF   # never send "toggle light" on boot
+
+binary_sensor:
+  - platform: uapbridge
+    relay_state:
+      name: "Option relay"
+    error_state:
+      name: "Error"
+    prewarn_state:
+      name: "Prewarning"
+    got_valid_broadcast:
+      name: "Drive connected"
+
+text_sensor:
+  - platform: uapbridge
+    id: garage_door_state
+    name: "Status"
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi signal"
+    update_interval: 300s
+    entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: "Restart"
