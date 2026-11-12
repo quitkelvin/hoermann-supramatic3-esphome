@@ -52,15 +52,31 @@ uapbridge_esp:
   uart_id: uart_bus
   rts_pin: GPIO21          # Waveshare: RS485 direction (HIGH = transmit)
   auto_correction: false   # never send commands on its own
-  parallel_uap1: true      # real UAP1 stays connected (default)
-  inject_v2: true          # recommended: immediate answer, 3 s fetch timeout, effect check
+  # Start with "monitor" (only listens, never sends). Check status, "Drive connected" and the
+  # diagnostic sensors first, then switch to "inject" to control the door next to the real UAP1.
+  mode: monitor            # monitor | inject | emulate (emulate = without UAP1, experimental)
   # p_series_mode: true    # ONLY for SupraMatic P series 3 (status reports only 0x0002/0x0001/0x0000)
+  # Defaults of the 1.0.1 safety options (each can be switched off for step-by-step testing):
+  # stop_priority: true        # Stop replaces a command still waiting to be fetched
+  # connection_timeout: 5s     # no valid broadcast for 5 s -> not connected, state unknown (0s = off)
+  # inject_max_failures: 5     # failed commands in a row -> no injects for inject_pause (0 = off)
+  # inject_pause: 60s
   derived_status:
     name: "Derived status"
   last_command:
     name: "Last command"
+  command_result:
+    name: "Last command result"
   raw_status:
     name: "Raw status"
+  valid_broadcasts:
+    name: "Valid broadcasts"
+  crc_errors:
+    name: "CRC errors"
+  seconds_since_broadcast:
+    name: "Seconds since last broadcast"
+  inject_failures:
+    name: "Inject failures in a row"
 
 cover:
   - platform: uapbridge
@@ -73,6 +89,9 @@ switch:
       id: venting_switch
       name: "Venting position"
 
+# E series: on/off light (the drive reports the light state).
+# P series 3: the light state is NOT reported -> remove output/light and use the
+# "toggle_light_button" below instead.
 output:
   - platform: uapbridge
     id: gd_light
@@ -107,5 +126,8 @@ sensor:
     entity_category: diagnostic
 
 button:
+  - platform: uapbridge
+    toggle_light_button:
+      name: "Toggle light"
   - platform: restart
     name: "Restart"

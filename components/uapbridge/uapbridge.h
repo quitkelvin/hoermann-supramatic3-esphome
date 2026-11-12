@@ -47,6 +47,8 @@ class UAPBridge : public uart::UARTDevice, public Component {
     bool get_venting_enabled() const { return this->venting_enabled; }
     virtual void set_light(bool state) = 0;
     bool get_light_enabled() const { return this->light_enabled; }
+    // 1.0.1: false if the drive does not report the light bit (P series) -> light can only be toggled
+    virtual bool is_light_state_reported() const { return true; }
     bool get_relay_enabled() const { return this->relay_enabled; }
     void set_relay_enabled(bool value) { this->relay_enabled = value; }
     bool get_error_state() const { return this->error_state; }

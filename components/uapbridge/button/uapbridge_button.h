@@ -29,5 +29,16 @@ protected:
   UAPBridge* parent_;
 };
 
+class UAPBridgeButtonLight : public button::Button, public Component {
+public:
+  void set_uapbridge_parent(UAPBridge* parent) {
+    this->parent_ = parent;
+  }
+  void press_action() override;
+
+protected:
+  UAPBridge* parent_;
+};
+
 }  // namespace uapbridge
 }  // namespace esphome

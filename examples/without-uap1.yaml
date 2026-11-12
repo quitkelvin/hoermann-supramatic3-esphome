@@ -1,7 +1,7 @@
 # Example: board on the Hörmann bus WITHOUT a UAP1 – the board emulates the UAP1
-# (behaviour of the upstream project). NOT VERIFIED by the authors of this fork:
+# (mode: emulate, behaviour of the upstream project). EXPERIMENTAL – NOT VERIFIED by the authors of this fork:
 # both of our installations run next to a real UAP1. Test carefully.
-# Never connect a UAP1 at the same time when parallel_uap1 is false (two devices with the
+# Never connect a UAP1 at the same time in mode: emulate (two devices with the
 # same bus address -> collisions, error 7 on the drive). All values are placeholders.
 substitutions:
   name: garage-door
@@ -54,10 +54,14 @@ uapbridge_esp:
   uart_id: uart_bus
   rts_pin: GPIO21          # Waveshare: RS485 direction (HIGH = transmit)
   auto_correction: false   # never send commands on its own
-  parallel_uap1: false     # board answers slave scan + every status request (UAP1 emulation)
-  # inject_v2 / p_series_mode are only available with parallel_uap1: true
+  mode: emulate            # EXPERIMENTAL: board answers slave scan + every status request (UAP1 emulation)
+  # p_series_mode is only available with mode: inject or monitor
   raw_status:
     name: "Raw status"
+  command_result:
+    name: "Last command result"
+  seconds_since_broadcast:
+    name: "Seconds since last broadcast"
 
 cover:
   - platform: uapbridge

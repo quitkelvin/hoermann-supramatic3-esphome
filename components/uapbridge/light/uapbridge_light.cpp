@@ -15,6 +15,10 @@ light::LightTraits UAPBridgeLight::get_traits() {
 void UAPBridgeLight::setup() {
   ESP_LOGD(TAG, "UAPBridgeLight::setup() - setup method called");
   this->parent_->add_on_state_callback([this]() { this->on_event_triggered(); });
+  if (!this->parent_->is_light_state_reported()) {
+    ESP_LOGW(TAG, "p_series_mode: the drive does not report the light state - this light entity only toggles. "
+                  "Use 'toggle_light_button' (button platform) instead.");
+  }
 }
 
 void UAPBridgeLight::write_state(light::LightState* state) {
@@ -28,6 +32,7 @@ void UAPBridgeLight::write_state(light::LightState* state) {
 }
 
 void UAPBridgeLight::on_event_triggered() {
+  if (!this->parent_->is_light_state_reported()) return;   // P series: nothing to sync, state is only assumed
   if (this->state_->current_values.is_on() != this->parent_->get_light_enabled()) {
     // Adjust the state of the light based on the external light state
     ESP_LOGD(TAG, "UAPBridgeLight::update() - adjusting state");

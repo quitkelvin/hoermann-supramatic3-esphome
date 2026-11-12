@@ -16,5 +16,10 @@ void UAPBridgeButtonImpulse::press_action() {
   this->parent_->action_impulse();
 }
 
+void UAPBridgeButtonLight::press_action() {
+  ESP_LOGD(TAG, "UAPBridgeButtonLight::press_action() - Toggling light");
+  this->parent_->action_toggle_light();
+}
+
 }  // namespace uapbridge
 }  // namespace esphome
